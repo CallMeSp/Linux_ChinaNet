@@ -1,17 +1,72 @@
 #! /usr/bin/python3
+# test1.0
 import json
 import base64
 import requests
 import time
 import hashlib
+import re
+import socket
 # 作为全局变量
-'''
-USER_ID: 2364100
-APP_VERSION: Android_college_5.4.0
-bras_ip: 58.213.239.3
-wan_ip: 10.163.123.70
-'''
 configDict={}
+
+def initial():
+    global configDict
+    with open('config.json','r') as f:
+        configDict=json.load(f)
+    res=requests.get('http://test.f-young.cn')
+    #!!!!!!这里的list可能长度为0，会溢出....
+    if len(res.history)>0:
+        realUrl=res.history[-1].url
+        print(realUrl)
+        args=realUrl.split('?')[1].split('&')
+        wan_ip=args[0].split('=')[1]
+        bras_ip=args[1].split('=')[1]
+        # 存储到config文件
+        configDict['wan_ip']=wan_ip
+        configDict['bras_ip']=bras_ip
+        with open('config.json','w') as f:
+            json.dump(configDict,f) 
+
+def getAppVersion():
+    res=requests.get('http://pre.f-young.cn/js/conf.js')
+    pattern=re.compile(r'\d\.\d\.\d')
+    version=pattern.search(res.text).group()
+    app_version='Android_college_'+version
+    return app_version
+
+def get8bin(s):
+    rawLenth=len(s)
+    result=''
+    for i in range(8-rawLenth):
+        result+='0'
+    result+=s
+    return result
+
+def getUserId():
+    global configDict
+    # 先转化为bytes
+    rawStr=configDict['account']+':'+configDict['passwd']
+    bytesAuth=rawStr.encode(encoding='utf-8')
+    # base64编码
+    Auth=str(base64.b64encode(bytesAuth),'utf-8')
+    head=head={'Authorization':'Basic %s'%Auth}
+
+    res=requests.get('https://cps.loocha.cn:9607/anony/login?1=%s'%getAppVersion(),headers=head,stream=True)
+    bufferstr=str(res.raw.read())
+
+    b1=bufferstr[16:18]
+    b2=bufferstr[20:22]
+    b3=bufferstr[24:26]
+    b4=bufferstr[28:30]
+
+    A=get8bin(bin(int(b4,16))[2:])[1:]
+    B=get8bin(bin(int(b3,16))[2:])[1:]
+    C=get8bin(bin(int(b2,16))[2:])[1:]
+    D=get8bin(bin(int(b1,16))[2:])[1:]
+
+    USER_ID=str(int(A+B+C+D,2))
+    return USER_ID
 
 def doFirstVerify():
     global configDict
@@ -105,26 +160,10 @@ def getPwd():
     if resDict['status']=='0':
         return resDict['telecomWifiRes']['password']
     else:
-        print('获取失败')
+        print('获取失败:'+resDict)
         return 0
     
-def initial():
-    global configDict
-    res=requests.get('http://test.f-young.cn')
-    #!!!!!!!!!!!这里的list可能长度为0，会溢出....
-    if len(res.history)>0:
-        realUrl=res.history[-1].url
-        print(realUrl)
-        args=realUrl.split('?')[1].split('&')
-        wan_ip=args[0].split('=')[1]
-        bras_ip=args[1].split('=')[1]
-        # 存储到config文件
-        configDict['wan_ip']=wan_ip
-        configDict['bras_ip']=bras_ip
-        with open('config.json','w') as f:
-            json.dump(configDict,f)
 
-    
 
 def getQr():
     global configDict
@@ -139,7 +178,7 @@ def getQr():
     if resDict['status']=='0':
         return resDict['telecomWifiRes']['password']
     else:
-        print('获取失败')
+        print('获取失败:',resDict)
         return 0
 
     
@@ -152,28 +191,6 @@ def realStart():
     elif rescode==2:#初步验证通过，下一步是登录
         loginChinaNet()
         
-def test():
-    head={'Authorization':'Basic MTc3MTI5MTgyMTU6c3AxMjM0NTY='}
-    res=requests.get('https://cps.loocha.cn:9607/anony/login?1=Android_college_5.4.0',headers=head)
-    print(res.text.split(' ')[1])
-    resinfo=str2bin(res.text.split(' ')[1])
-    hexinfo=str2hex(res.text)
-    print(hexinfo)
-    # b1=resinfo[49:56]
-    # b2=resinfo[41:48]
-    # b3=resinfo[33:40]
-    # b4=resinfo[25:32]
-
-    # bin_userId=[]
-    # bin_userId.append(b1)
-    # bin_userId.append(b2)
-    # bin_userId.append(b3)
-    # bin_userId.append(b4)
-
-    # print(bin2dec(''.join(bin_userId)))
-
-# realStart()
-
 def str2hex(s):
     return ' '.join([hex(ord(c)).replace('0x','') for c in s])
 
@@ -188,59 +205,73 @@ def bin2dec(s):
 
 def getPwdtest():
     # 以下是临时测试数据...
-    head={'Authorization':'Basic MTc3MTI5MTgyMTU6c3AxMjM0NTY='}
-    user_id='2364100'
+    global configDict
+    # 先转化为bytes
+    rawStr=configDict['account']+':'+configDict['passwd']
+    bytesAuth=rawStr.encode(encoding='utf-8')
+    # base64编码
+    Auth=str(base64.b64encode(bytesAuth),'utf-8')
+    head={'Authorization':'Basic %s'%Auth}
+    user_id=getUserId()
     did_id='0'
-    APP_VERSION= 'Android_college_5.4.0'
-    MODEL='callmesp-PC'
+    APP_VERSION= getAppVersion()
+    MODEL=socket.gethostname()
     # ..................
 
     nowtime=str(int(time.time()*1000))
     params='&server_did=' + did_id + '&time=' + nowtime + '&type=1'
-    sign = getMD5('mobile='+'17712918215'+ '&model='+'callmesp-PC'+params)
+    sign = getMD5('mobile='+configDict['account']+ '&model='+MODEL+params)
     res=requests.get('https://wifi.loocha.cn/%s/wifi/telecom/pwd?1=%s&%s&sign=%s&mm=%s'%(user_id,APP_VERSION,params,sign,MODEL),headers=head)
     resDict=json.loads(res.text)
     if resDict['status']=='0':
+        print('code:'+resDict['telecomWifiRes']['password'])
         return resDict['telecomWifiRes']['password']
     else:
-        print('获取失败')
-        return 0
+        print('pwd获取失败',resDict)
+        return '402034'
 
 def getQrtest():
     # 以下是临时测试数据...
-    head={'Authorization':'Basic MTc3MTI5MTgyMTU6c3AxMjM0NTY='}
-    user_id='2364100'
-    MODEL='callmesp-PC'
+    user_id=getUserId()
+    MODEL=socket.gethostname()
     did_id='0'
-    wan_ip='10.163.123.70'
-    bras_ip='58.213.239.3'
-    APP_VERSION= 'Android_college_5.4.0'
+    wan_ip=configDict['wan_ip']
+    bras_ip=configDict['bras_ip']
+    APP_VERSION= getAppVersion()
     # ..................
     res=requests.get('https://wifi.loocha.cn/0/wifi/qrcode?1=%s&brasip=%s&ulanip=%s&wlanip=%s&mm=default'%(APP_VERSION,bras_ip,wan_ip,wan_ip))
     resDict=json.loads(res.text)
 
     if resDict['status']=='0':
+        print('qrcode:'+resDict['telecomWifiRes']['password'])
         return resDict['telecomWifiRes']['password']
     else:
-        print('获取失败')
+        print('qr获取失败')
         return 0
 
 def doOnlineTest():
     # 以下是临时测试数据...
-    head={'Authorization':'Basic MTc3MTI5MTgyMTU6c3AxMjM0NTY='}
-    user_id='2364100'
-    MODEL='callmesp-PC'
+    global configDict
+    # 先转化为bytes
+    rawStr=configDict['account']+':'+configDict['passwd']
+    bytesAuth=rawStr.encode(encoding='utf-8')
+    # base64编码
+    Auth=str(base64.b64encode(bytesAuth),'utf-8')
+    head={'Authorization':'Basic %s'%Auth}
+    user_id=getUserId()
+    MODEL=socket.gethostname()
     did_id='0'
-    wan_ip='10.163.123.70'
-    bras_ip='58.213.239.3'
-    APP_VERSION= 'Android_college_5.4.0'
+    wan_ip=configDict['wan_ip']
+    bras_ip=configDict['bras_ip']
+    APP_VERSION= getAppVersion()
     # ..................
     nowtime=str(int(time.time()*1000))
     params='&server_did=' + did_id + '&time=' + nowtime + '&type=1'
-    sign = getMD5('mobile='+'17712918215'+ '&model='+'callmesp-PC'+params)
+    sign = getMD5('mobile='+configDict['account']+ '&model='+MODEL+params)
     PARAM='1=%s&qrcode=%s&code=%s&mm=%s&%s&sign=%s&type=1&server_did=%s&time=%s'%(APP_VERSION,getQrtest(),getPwdtest(),MODEL,params,sign,did_id,nowtime)
     finalUrl='https://wifi.loocha.cn/%s/wifi/telecom/auto/login?%s'%(user_id,PARAM)
     res=requests.post(finalUrl,headers=head)
     print(res.text)
 
+initial()
 doOnlineTest()
