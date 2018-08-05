@@ -228,7 +228,7 @@ def getPwdtest():
         return resDict['telecomWifiRes']['password']
     else:
         print('pwd获取失败',resDict)
-        return '402034'
+        return '823144'
 
 def getQrtest():
     # 以下是临时测试数据...
